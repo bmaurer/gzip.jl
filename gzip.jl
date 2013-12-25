@@ -324,7 +324,8 @@ function inflate(file::IO, out::IO=STDOUT)
             break
         end
     end
-    write(out, decoded_text)
+    #FIXME: this should actually be done by passing /dev/null into this function
+    #write(out, decoded_text)
 end
 
 function inflate_block!(decoded_text, bs::BitStream)
@@ -366,13 +367,6 @@ function inflate_block!(decoded_text, bs::BitStream, literal_tree::HuffmanTree, 
             print("}")
             print("\033[0m")
             flush(STDOUT)
-        end
-        if (i < 100) 
-            sleep(0.20)
-        elseif (i < 200)
-            sleep(0.10)
-        else
-            sleep(0.05)
         end
     end
     return decoded_text
