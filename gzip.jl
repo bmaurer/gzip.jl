@@ -1,8 +1,10 @@
 type BitStream
     stream::IO
     bv::BitVector
+    bits_read::Int64
+	header_bits::Int64
 end
-BitStream(io::IO) = BitStream(io, BitVector(0))
+BitStream(io::IO) = BitStream(io, BitVector(0), 0, 0)
 
 typealias GzipFlags Uint8
 
@@ -108,6 +110,7 @@ function read_bits(stream::BitStream, n)
         new_bits = make_bitvector(byte)
         cached_bits = vcat(cached_bits, new_bits)
     end
+    stream.bits_read += n
     stream.bv = cached_bits[n+1:end]
     return cached_bits[1:n]
 end
@@ -326,11 +329,16 @@ function inflate(file::IO, out::IO=STDOUT)
             break
         end
     end
+	println()
+	println(bs.bits_read)
     #FIXME: this should actually be done by passing /dev/null into this function
     #write(out, decoded_text)
 end
 
+histo = zeros(Int64,258)
+
 function inflate_block!(decoded_text, bs::BitStream)
+	begin_bits = bs.bits_read
     head = read(bs, HuffmanHeader)
     
     first_tree = read_first_tree(bs, head.hclen)
@@ -344,33 +352,58 @@ function inflate_block!(decoded_text, bs::BitStream)
     dist_code_table = create_code_table(distance_codes, [0:length(distance_codes)-1])
     distance_tree = create_huffman_tree(dist_code_table)
     
-    return inflate_block!(decoded_text, bs, literal_tree, distance_tree)
+    return inflate_block!(decoded_text, bs, literal_tree, distance_tree, bs.bits_read - begin_bits)
 end
 
-function inflate_block!(decoded_text, bs::BitStream, literal_tree::HuffmanTree, distance_tree::HuffmanTree)
+headers(Int64) = 0
+
+function inflate_block!(decoded_text, bs::BitStream, literal_tree::HuffmanTree, distance_tree::HuffmanTree, header_bits::Int64)
+	bs.header_bits += header_bits
+
     i = 0
     while true
         i += 1
+		bits = bs.bits_read
         code = read_huffman_bits(bs, literal_tree)
+		
+		
         if code == 256 # Stop code; end of block
             break
         end
         if code <= 255 # ASCII character
+			bits = bs.bits_read - bits
             append!(decoded_text, [convert(Uint8, code)])
             print(display_ascii([convert(Uint8, code)]))
             flush(STDOUT)
+			histo[1] += bits
         else # Pointer to previous text
             len = read_length_code(bs, code)
             distance = read_distance_code(bs, distance_tree)
+			bits = bs.bits_read - bits
             copy_text!(decoded_text, distance, len)
-            print("\033[31m")
-            print("{")
+			histo[len] += bits
+            if len <= 8
+				print("\033[31m")
+				#print((display_ascii(decoded_text[end-len+1: end])))
+            elseif len <= 32
+				print("\033[34m")
+			elseif len <= 64
+				print("\033[33m")
+	    	else
+				print("\033[32m")
+	    	end
+	    #print("{")
             print((display_ascii(decoded_text[end-len+1: end])))
-            print("}")
+            #print("}")
             print("\033[0m")
             flush(STDOUT)
         end
     end
+	println();
+	#@printf("H: %d\n", bs.header_bits)
+	for i=1:258
+			#println(histo[i]);
+	end
     return decoded_text
 end
 
